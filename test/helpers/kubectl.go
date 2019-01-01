@@ -41,10 +41,11 @@ import (
 
 const (
 	// KubectlCmd Kubernetes controller command
-	KubectlCmd      = "kubectl"
-	manifestsPath   = "k8sT/manifests/"
-	descriptorsPath = "../examples/kubernetes"
-	kubeDNSLabel    = "k8s-app=kube-dns"
+	KubectlCmd        = "kubectl"
+	manifestsPath     = "k8sT/manifests/"
+	descriptorsPath   = "../examples/kubernetes"
+	kubeDNSLabel      = "k8s-app=kube-dns"
+	operatorPatchName = "cilium-operator-patch.yaml"
 
 	// DNSHelperTimeout is a predefined timeout value for K8s DNS commands. It
 	// must be larger than 5 minutes because kubedns has a hardcoded resync
@@ -822,6 +823,15 @@ func (kub *Kubectl) DeployPatch(original, patch string) error {
 	return nil
 }
 
+func versionRequiresOperator(versionTag string) bool {
+	switch versionTag {
+	case "v1.0", "v1.1", "v1.2", "v1.3":
+		return false
+	}
+
+	return true
+}
+
 // ciliumInstall installs all Cilium descriptors into kubernetes.
 // dsPatchName corresponds to the DaemonSet patch, found by
 // getK8sDescriptorPatch, that will be applied to the original Cilium DaemonSet
@@ -831,7 +841,7 @@ func (kub *Kubectl) DeployPatch(original, patch string) error {
 // descriptor, found by getK8sDescriptor.
 // Returns an error if any patch or if any original descriptors files were not
 // found.
-func (kub *Kubectl) ciliumInstall(dsPatchName, cmPatchName string, getK8sDescriptor, getK8sDescriptorPatch func(filename string) string) error {
+func (kub *Kubectl) ciliumInstall(dsPatchName, cmPatchName string, getK8sDescriptor, getK8sDescriptorPatch func(filename string) string, versionTag string) error {
 	cmPathname := getK8sDescriptor("cilium-cm.yaml")
 	if cmPathname == "" {
 		return fmt.Errorf("Cilium ConfigMap descriptor not found")
@@ -843,6 +853,14 @@ func (kub *Kubectl) ciliumInstall(dsPatchName, cmPatchName string, getK8sDescrip
 	rbacPathname := getK8sDescriptor("cilium-rbac.yaml")
 	if rbacPathname == "" {
 		return fmt.Errorf("Cilium RBAC descriptor not found")
+	}
+
+	operatorRbacPathname := getK8sDescriptor("cilium-operator-rbac.yaml")
+	operatorPathname := getK8sDescriptor("cilium-operator.yaml")
+	if versionRequiresOperator(versionTag) {
+		if operatorRbacPathname == "" || operatorPathname == "" {
+			return fmt.Errorf("Cilium DaemonSet descriptor not found")
+		}
 	}
 
 	deployOriginal := func(original string) error {
@@ -878,6 +896,24 @@ func (kub *Kubectl) ciliumInstall(dsPatchName, cmPatchName string, getK8sDescrip
 	if err := kub.DeployPatch(dsPathname, getK8sDescriptorPatch(dsPatchName)); err != nil {
 		return err
 	}
+
+	if versionRequiresOperator(versionTag) {
+		ginkgoext.By("Deploying Cilium operator")
+		if err := deployOriginal(operatorRbacPathname); err != nil {
+			return err
+		}
+
+		if err := kub.DeployPatch(operatorPathname, getK8sDescriptorPatch(operatorPatchName)); err != nil {
+			return err
+		}
+
+		ginkgoext.By("Waiting for operator to become ready")
+		err := kub.WaitforNPods(KubeSystemNamespace, "-l name=cilium-operator", 1, 300)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -889,7 +925,7 @@ func (kub *Kubectl) ciliumInstall(dsPatchName, cmPatchName string, getK8sDescrip
 // Returns an error if any patch or if any original descriptors files were not
 // found.
 func (kub *Kubectl) CiliumInstall(dsPatchName, cmPatchName string) error {
-	return kub.ciliumInstall(dsPatchName, cmPatchName, GetK8sDescriptor, ManifestGet)
+	return kub.ciliumInstall(dsPatchName, cmPatchName, GetK8sDescriptor, ManifestGet, "latest")
 }
 
 // CiliumPreFlightInstall install Cilium pre-flight DaemonSet.
@@ -932,7 +968,7 @@ func (kub *Kubectl) CiliumInstallVersion(dsPatchName, cmPatchName, versionTag st
 	getK8sDescriptor := func(filename string) string {
 		return fmt.Sprintf("https://raw.githubusercontent.com/cilium/cilium/%s/examples/kubernetes/%s/%s", versionTag, GetCurrentK8SEnv(), filename)
 	}
-	return kub.ciliumInstall(dsPatchName, cmPatchName, getK8sDescriptor, getK8sDescriptorPatch)
+	return kub.ciliumInstall(dsPatchName, cmPatchName, getK8sDescriptor, getK8sDescriptorPatch, versionTag)
 }
 
 // GetCiliumPods returns a list of all Cilium pods in the specified namespace,
