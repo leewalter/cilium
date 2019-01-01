@@ -26,7 +26,6 @@ import (
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/ipam"
-	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	criRuntime "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
-	k8sLbls "k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 )
 
@@ -269,16 +267,6 @@ func (c *criClient) handleCreateWorkload(id string, retry bool) {
 		}
 
 		ep.SetContainerID(id)
-
-		// In Kubernetes mode, attempt to retrieve pod name stored in
-		// pod runtime label
-		//
-		// FIXME: Abstract via interface so other workload types can
-		// implement this
-		if k8s.IsEnabled() {
-			ep.SetK8sNamespace(k8sLbls.GetPodNamespace(pod.Labels))
-			ep.SetK8sPodName(k8sLbls.GetPodName(pod.Labels))
-		}
 
 		// Update map allowing to lookup endpoint by endpoint
 		// attributes with new attributes set on endpoint

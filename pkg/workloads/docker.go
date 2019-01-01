@@ -33,7 +33,6 @@ import (
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/ipam"
-	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
@@ -46,7 +45,6 @@ import (
 	dNetwork "github.com/docker/engine-api/types/network"
 	"github.com/sirupsen/logrus"
 	ctx "golang.org/x/net/context"
-	k8sDockerLbls "k8s.io/kubernetes/pkg/kubelet/types"
 )
 
 const (
@@ -477,18 +475,6 @@ func (d *dockerClient) handleCreateWorkload(id string, retry bool) {
 
 		// Docker appends '/' to container names.
 		ep.SetContainerName(strings.Trim(containerName, "/"))
-
-		// In Kubernetes mode, attempt to retrieve pod name stored in
-		// container runtime label
-		//
-		// FIXME: Abstract via interface so other workload types can
-		// implement this
-		if k8s.IsEnabled() {
-			if dockerContainer.Config != nil {
-				ep.SetK8sNamespace(k8sDockerLbls.GetPodNamespace(dockerContainer.Config.Labels))
-				ep.SetK8sPodName(k8sDockerLbls.GetPodName(dockerContainer.Config.Labels))
-			}
-		}
 
 		// Update map allowing to lookup endpoint by endpoint
 		// attributes with new attributes set on endpoint
